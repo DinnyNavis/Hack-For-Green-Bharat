@@ -1,0 +1,142 @@
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  output_data:
+
+
+services:
+  # ─── Kafka (KRaft mode — no Zookeeper needed) ────────────────────────────
+  kafka:
+    image: apache/kafka:3.8.1
+    container_name: kafka
+    networks: [ monitoring ]
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: "5L6g3nShT-eMCtK--X86sw"
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
+    healthcheck:
+      test: [ "CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list" ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ─── Kafka Topic Init ────────────────────────────────────────────────────
+  kafka-init:
+    image: apache/kafka:3.8.1
+    container_name: kafka-init
+    networks: [ monitoring ]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: [ "/bin/bash", "-c" ]
+    command:
+      - |
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists \
+          --bootstrap-server kafka:9092 \
+          --replication-factor 1 --partitions 4 \
+          --topic service-logs
+        echo "✅ Topic 'service-logs' created"
+    restart: "no"
+
+  # ─── Log Producer ────────────────────────────────────────────────────────
+  log-producer:
+    build:
+      context: ./producer
+      dockerfile: Dockerfile
+    container_name: log-producer
+    networks: [ monitoring ]
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    env_file: .env
+    environment:
+      KAFKA_BROKER: kafka:9092
+    restart: unless-stopped
+
+  # ─── Pathway Streaming Pipeline ──────────────────────────────────────────
+  pathway-pipeline:
+    build:
+      context: .
+      dockerfile: pipeline/Dockerfile
+    container_name: pathway-pipeline
+    networks: [ monitoring ]
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    env_file: .env
+    environment:
+      KAFKA_BROKER: kafka:9092
+      OUTPUT_PATH: /app/output/alerts.jsonl
+      RUNBOOK_DIR: /app/data/runbooks
+    volumes:
+      - output_data:/app/output
+      - ./data:/app/data:ro
+    restart: unless-stopped
+
+  # ─── FastAPI Backend ─────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: api
+    networks: [ monitoring ]
+    depends_on:
+      - pathway-pipeline
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - output_data:/app/output:ro
+      - ./data:/app/data:ro
+    environment:
+      ALERTS_PATH: /app/output/alerts.jsonl
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ─── Notifier (Slack / Email) ────────────────────────────────────────────
+  notifier:
+    build:
+      context: ./notifier
+      dockerfile: Dockerfile
+    container_name: notifier
+    networks: [ monitoring ]
+    depends_on:
+      - pathway-pipeline
+    env_file: .env
+    volumes:
+      - output_data:/app/output:ro
+    environment:
+      ALERTS_PATH: /app/output/alerts.jsonl
+    restart: unless-stopped
+
+  # ─── Web Dashboard (Nginx) ───────────────────────────────────────────────
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: dashboard
+    networks: [ monitoring ]
+    ports:
+      - "3000:80"
+    restart: unless-stopped

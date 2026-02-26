@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FinLog Monitor — Real-Time Anomaly Detection</title>
+  <meta name="description"
+    content="Real-time log anomaly detection dashboard for financial services — trading, payments, banking, and auth services." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+  <div class="background-decoration">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+  </div>
+
+  <div class="app">
+
+    <!-- ── Header ──────────────────────────────────────────────────── -->
+    <header>
+      <div class="header-left">
+        <div class="logo">
+          <img src="finlog_monitor.png" alt="FinLog Logo" />
+        </div>
+        <div>
+          <div class="header-title">FinLog Monitor</div>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="live-badge" id="liveStatusBadge">
+          <div class="ws-dot" id="wsDot"></div>
+          <span id="wsLabel">LIVE MONITOR</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ── Service Status Bar ──────────────────────────────────────── -->
+    <div class="status-bar" id="statusBar">
+      <div class="service-pill active" data-service="all" onclick="App.filterService('all', this)">
+        <div class="pill-dot healthy"></div>
+        <span>All Services</span>
+      </div>
+      <div class="service-pill" data-service="trading-service" onclick="App.filterService('trading-service', this)">
+        <div class="pill-dot unknown" id="dot-trading-service"></div>
+        <span>trading-service</span>
+        <span class="pill-count" id="count-trading-service">0</span>
+      </div>
+      <div class="service-pill" data-service="payments-service" onclick="App.filterService('payments-service', this)">
+        <div class="pill-dot unknown" id="dot-payments-service"></div>
+        <span>payments-service</span>
+        <span class="pill-count" id="count-payments-service">0</span>
+      </div>
+      <div class="service-pill" data-service="banking-app" onclick="App.filterService('banking-app', this)">
+        <div class="pill-dot unknown" id="dot-banking-app"></div>
+        <span>banking-app</span>
+        <span class="pill-count" id="count-banking-app">0</span>
+      </div>
+      <div class="service-pill" data-service="auth-service" onclick="App.filterService('auth-service', this)">
+        <div class="pill-dot unknown" id="dot-auth-service"></div>
+        <span>auth-service</span>
+        <span class="pill-count" id="count-auth-service">0</span>
+      </div>
+    </div>
+
+    <!-- ── Main ───────────────────────────────────────────────────── -->
+    <div class="main">
+
+      <!-- Left Panel -->
+      <div class="panel-left">
+
+        <!-- Stats Row -->
+        <div class="stats-row">
+          <div class="stat-box">
+            <div class="stat-box-value critical" id="statCritical">0</div>
+            <div class="stat-box-label">Critical</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-box-value warning" id="statWarning">0</div>
+            <div class="stat-box-label">Warning</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-box-value" id="statTotal">0</div>
+            <div class="stat-box-label">Total Alerts</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-box-value healthy" id="statHealthy">4</div>
+            <div class="stat-box-label">Services Up</div>
+          </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-section">
+          <div class="section-header">
+            <div class="section-title">Live Metrics</div>
+            <div style="font-size:11px;color:var(--text-muted)">60-second windows</div>
+          </div>
+          <div class="charts-grid">
+            <div class="chart-card">
+              <div class="chart-card-title">Error Rate by Service (%)</div>
+              <div class="chart-wrap"><canvas id="chartErrorRate"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-title">Anomaly Severity Mix</div>
+              <div class="chart-wrap"><canvas id="chartSeverityDonut"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-title">Alert Volume (rolling)</div>
+              <div class="chart-wrap"><canvas id="chartVolume"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-title">Anomaly Type Breakdown</div>
+              <div class="chart-wrap"><canvas id="chartAnomalyTypes"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Alert Feed -->
+        <div class="alert-feed">
+          <div class="feed-header">
+            <div class="section-title">Alert Feed</div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <span class="feed-count" id="feedCount">0 alerts</span>
+              <div class="feed-filters">
+                <button class="filter-btn active" id="filterAll" onclick="App.setSeverityFilter('all', this)">
+                  All
+                </button>
+                <button class="filter-btn critical" id="filterCritical"
+                  onclick="App.setSeverityFilter('CRITICAL', this)">
+                  Critical
+                </button>
+                <button class="filter-btn warning" id="filterWarning" onclick="App.setSeverityFilter('WARNING', this)">
+                  Warning
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="feed-list" id="feedList">
+            <div class="empty-feed" id="emptyFeed">
+              <div class="icon">🔍</div>
+              <p>Waiting for anomalies…</p>
+              <p style="font-size:11px">Pipeline starts detecting after the first 60-second window</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Panel — Detail View -->
+      <div class="panel-right">
+        <div class="detail-panel" id="detailPanel">
+          <div class="detail-placeholder">
+            <div class="icon">📋</div>
+            <p style="font-weight:600">Select an alert</p>
+            <p style="font-size:12px">Click any alert in the feed to see LLM-generated root cause analysis and
+              remediation steps.</p>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /.main -->
+  </div><!-- /.app -->
+
+  <!-- Toast container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Chart.js (Local) -->
+  <script src="chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+
+</html>
